@@ -3,6 +3,7 @@
 #define CATA_LIBINTL_H
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,8 @@ namespace cata_libintl
 {
 using u8 = uint8_t;
 using u32 = uint32_t;
+
+class cata_libintl_exception : public std::runtime_error {};
 
 /**
  * Plural forms AST node type.

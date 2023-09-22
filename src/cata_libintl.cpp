@@ -1,11 +1,49 @@
 #include "cata_libintl.h"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <fstream>
+#include <ios>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <sstream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+bool string_starts_with( const std::string& what, const std::string& with ) {
+    if (what.size() < with.size()) {
+        return false;
+    }
+    return 0 == strncmp(what.c_str(), with.c_str(), with.size());
+}
+
+std::vector<std::string> string_split( const std::string& s, char delim )
+{
+    std::vector<std::string> ret;
+    auto begin = s.begin();
+    auto end = s.end();
+    auto it = begin;
+    while(true) {
+        auto found = std::find( it, end, delim );
+        if (found == end) {
+            ret.emplace_back(it, end);
+            break;
+        }
+        ret.emplace_back(it, found);
+        it = found + 1;
+        if (it == end) {
+            ret.emplace_back(it, end);
+            break;
+        }
+    }
+    return ret;
+}
 
 // ===============================================================================================
 // Plural forms
@@ -90,7 +128,6 @@ struct PlfTStream {
     }
 
     PlfToken peek_internal() const {
-        std::string tok;
         size_t pos = this->pos;
         while( pos < end ) {
             char c = ( *s )[pos];
@@ -100,6 +137,7 @@ struct PlfTStream {
                 continue;
             } else if( c >= '0' && c <= '9' ) {
                 // number
+                std::string tok;
                 size_t start_pos = pos;
                 while( pos < end && c >= '0' && c <= '9' ) {
                     tok.push_back( c );
@@ -113,7 +151,7 @@ struct PlfTStream {
                     }
                     return PlfToken{ PlfOp::Literal, ul, start_pos, pos - start_pos };
                 } catch( const std::logic_error &err ) {
-                    std::string e = string_format( "invalid number '%s' at pos %d", tok, start_pos );
+                    std::string e = fmt::format( "invalid number '{}' at pos {}", tok, start_pos );
                     throw std::runtime_error( e );
                 }
             }
@@ -124,7 +162,7 @@ struct PlfTStream {
                 }
             }
             pos++;
-            std::string e = string_format( "unexpected character '%c' at pos %d", c, pos - 1 );
+            std::string e = fmt::format( "unexpected character '{}' at pos {}", c, pos - 1 );
             throw std::runtime_error( e );
         }
         return PlfToken{ PlfOp::NumOps, 0, pos, 0 };
@@ -173,7 +211,7 @@ PlfNodePtr parse_plural_rules( const std::string &s )
     ParseRet ret = plf_get_expr( tokstr );
     if( ret.ts.has_tokens() ) {
         PlfToken tok = ret.ts.peek();
-        std::string e = string_format( "unexpected token at pos %d", tok.start );
+        std::string e = fmt::format( "unexpected token at pos {}", tok.start );
         throw std::runtime_error( e );
     }
     return std::move( ret.expr );
@@ -203,7 +241,7 @@ ParseRet plf_get_expr( const PlfTStream &ts )
     ParseRet e2 = plf_get_expr( e1.ts.cloned().skip() );
     if( e2.ts.peek().kind != PlfOp::TerDelim ) {
         PlfToken tok = e2.ts.peek();
-        std::string e = string_format( "expected ternary delimiter at pos %d", tok.start );
+        std::string e = fmt::format( "expected ternary delimiter at pos {}", tok.start );
         throw std::runtime_error( e );
     }
     ParseRet e3 = plf_get_expr( e2.ts.cloned().skip() );
@@ -268,7 +306,7 @@ ParseRet plf_get_value( const PlfTStream &ts )
         ParseRet e = plf_get_expr( ts.cloned().skip() );
         if( e.ts.peek().kind != PlfOp::BrClose ) {
             PlfToken tok = e.ts.peek();
-            std::string e = string_format( "expected closing bracket at pos %d", tok.start );
+            std::string e = fmt::format( "expected closing bracket at pos {}", tok.start );
             throw std::runtime_error( e );
         }
         return ParseRet( std::move( e.expr ), e.ts.cloned().skip() );
@@ -283,7 +321,7 @@ ParseRet plf_get_value( const PlfTStream &ts )
             0, nullptr, nullptr, nullptr, PlfOp::Variable,
         } ), ts.cloned().skip() );
     } else {
-        std::string e = string_format( "expected expression at pos %d", next.start );
+        std::string e = fmt::format( "expected expression at pos {}", next.start );
         throw std::runtime_error( e );
     }
 }
@@ -294,7 +332,7 @@ size_t PlfNode::eval( size_t n ) const
         case PlfOp::Mod: {
             size_t right = b->eval( n );
             if( right == 0 ) {
-                std::string e = string_format( "DBZ in PlfNode::eval( %d ), node='%s'", n, debug_dump() );
+                std::string e = fmt::format( "DBZ in PlfNode::eval( {} ), node='{}'", n, debug_dump() );
                 throw std::runtime_error( e );
             }
             return a->eval( n ) % right;
@@ -323,7 +361,7 @@ size_t PlfNode::eval( size_t n ) const
             return n;
         default:
             // unreachable
-            assert( false );
+            break;
     }
     return 0;
 }
@@ -332,9 +370,9 @@ std::string PlfNode::debug_dump() const
 {
     switch( op ) {
         case PlfOp::TerCond:
-            return string_format( "(%s?%s:%s)", a->debug_dump(), b->debug_dump(), c->debug_dump() );
+            return fmt::format( "({}?{}:{})", a->debug_dump(), b->debug_dump(), c->debug_dump() );
         case PlfOp::Literal:
-            return string_format( "%d", literal_val );
+            return fmt::format( "{}", literal_val );
         case PlfOp::Variable:
             return "n";
         default: {
@@ -345,7 +383,7 @@ std::string PlfNode::debug_dump() const
                     break;
                 }
             }
-            return string_format( "(%s%s%s)", a->debug_dump(), ops, b->debug_dump() );
+            return fmt::format( "({}{}{})", a->debug_dump(), ops, b->debug_dump() );
         }
     }
 }
@@ -360,11 +398,13 @@ constexpr u8 PLF_SEPARATOR = 0;
 trans_catalogue trans_catalogue::load_from_file( const std::string &file_path )
 {
     std::stringstream buffer;
-    cata_ifstream file = std::move( cata_ifstream().mode( cata_ios_mode::binary ).open( file_path ) );
+
+    std::ifstream file;
+    file.open( file_path.c_str(), std::ifstream::binary );
     if( !file.is_open() ) {
         throw std::runtime_error( "failed to open file" );
     }
-    buffer << file->rdbuf();
+    buffer << file.rdbuf();
     if( file.fail() ) {
         throw std::runtime_error( "failed to read file" );
     }
@@ -379,7 +419,7 @@ trans_catalogue trans_catalogue::load_from_memory( std::string mo_file )
 u8 trans_catalogue::get_u8( u32 offs ) const
 {
     if( offs + 1 > buf_size() ) {
-        std::string e = string_format( "tried get_u8() at offs %#x with file size %#x", offs, buf_size() );
+        std::string e = fmt::format( "tried get_u8() at offs {:#x} with file size {:#x}", offs, buf_size() );
         throw std::runtime_error( e );
     }
     return get_u8_unsafe( offs );
@@ -388,7 +428,7 @@ u8 trans_catalogue::get_u8( u32 offs ) const
 u32 trans_catalogue::get_u32( u32 offs ) const
 {
     if( offs + 4 > buf_size() ) {
-        std::string e = string_format( "tried get_u32() at offs %#x with file size %#x", offs, buf_size() );
+        std::string e = fmt::format( "tried get_u32() at offs {:#x} with file size {:#x}", offs, buf_size() );
         throw std::runtime_error( e );
     }
     return get_u32_unsafe( offs );
@@ -419,8 +459,8 @@ std::string trans_catalogue::get_metadata() const
     string_descr k = get_string_descr_unsafe( offs_orig_table );
 
     if( k.length != METADATA_STRING_LEN ) {
-        std::string e = string_format(
-                            "invalid metadata entry (expected length %#x, got %#x)",
+        std::string e = fmt::format(
+                            "invalid metadata entry (expected length {}, got {})",
                             METADATA_STRING_LEN, k.length
                         );
         throw std::runtime_error( e );
@@ -448,8 +488,8 @@ void trans_catalogue::process_file_header()
     }
     this->is_little_endian = magic == MO_MAGIC_NUMBER_LE;
     if( get_u32( OFFS_REVISION ) != MO_SUPPORTED_REVISION ) {
-        std::string e = string_format(
-                            "expected revision %d, got %d",
+        std::string e = fmt::format(
+                            "expected revision {}, got {}",
                             MO_SUPPORTED_REVISION,
                             get_u32( OFFS_REVISION )
                         );
@@ -468,8 +508,8 @@ void trans_catalogue::check_string_terminators()
         // does not extend beyond file boundaries.
         string_descr s = get_string_descr( offs );
         if( s.offset + s.length + 1 > buf_size() ) {
-            std::string e = string_format(
-                                "string_descr at offs %#x: extends beyond EOF (len:%#x offs:%#x fsize:%#x)",
+            std::string e = fmt::format(
+                                "string_descr at offs {:#x}: extends beyond EOF (len:{:#x} offs:{:#x} fsize:{:#x})",
                                 offs, s.length, s.offset, buf_size()
                             );
             throw std::runtime_error( e );
@@ -477,8 +517,8 @@ void trans_catalogue::check_string_terminators()
         // Also check for existence of the null byte.
         u8 terminator = get_u8( s.offset + s.length );
         if( terminator != 0 ) {
-            std::string e = string_format(
-                                "string_descr at offs %#x: missing null terminator",
+            std::string e = fmt::format(
+                                "string_descr at offs {:#x}: missing null terminator",
                                 offs
                             );
             throw std::runtime_error( e );
@@ -521,8 +561,8 @@ void trans_catalogue::check_string_plurals()
 
         // Number of plural forms should match the number specified in metadata
         if( plural_forms != this->plurals.num ) {
-            std::string e = string_format(
-                                "string_descr at offs %#x: expected %d plural forms, got %d",
+            std::string e = fmt::format(
+                                "string_descr at offs {:#x}: expected {} plural forms, got {}",
                                 offs_tr, this->plurals.num, plural_forms
                             );
             throw std::runtime_error( e );
@@ -547,9 +587,9 @@ void trans_catalogue::check_encoding( const meta_headers &headers )
             found = true;
             static const std::string expected = "Content-Type: text/plain; charset=UTF-8";
             if( entry != expected ) {
-                std::string e =
-                    string_format( "unrecognized value in Content-Type header (wrong charset?). Expected \"%s\"",
-                                   expected );
+                std::string e = fmt::format(
+                    "unrecognized value in Content-Type header (wrong charset?). Expected \"{}\"", expected
+                );
                 throw std::runtime_error( e );
             }
             break;
@@ -567,9 +607,9 @@ void trans_catalogue::check_encoding( const meta_headers &headers )
             found = true;
             static const std::string expected = "Content-Transfer-Encoding: 8bit";
             if( entry != expected ) {
-                std::string e =
-                    string_format( "unrecognized value in Content-Transfer-Encoding header. Expected \"%s\"",
-                                   expected );
+                std::string e = fmt::format(
+                    "unrecognized value in Content-Transfer-Encoding header. Expected \"{}\"", expected
+                );
                 throw std::runtime_error( e );
             }
             break;
@@ -626,13 +666,11 @@ trans_catalogue::catalogue_plurals_info trans_catalogue::parse_plf_header(
         try {
             ret.num = std::stoul( plf_n_raw );
         } catch( const std::runtime_error &err ) {
-            std::string e = string_format( "failed to parse Plural-Forms nplurals number '%s': %s", plf_n_raw,
-                                           err.what() );
+            std::string e = fmt::format( "failed to parse Plural-Forms nplurals number '{}': {}", plf_n_raw.c_str(), err.what() );
             throw std::runtime_error( e );
         }
         if( ret.num == 0 || ret.num > MAX_PLURAL_FORMS ) {
-            std::string e = string_format( "expected at most 1-%d plural forms, got %d", MAX_PLURAL_FORMS,
-                                           ret.num );
+            std::string e = fmt::format( "expected at most {} plural forms, got {}", MAX_PLURAL_FORMS, ret.num );
             throw std::runtime_error( e );
         }
     }
@@ -647,7 +685,7 @@ trans_catalogue::catalogue_plurals_info trans_catalogue::parse_plf_header(
         try {
             ret.expr = parse_plural_rules( plf_rules_raw );
         } catch( const std::runtime_error &err ) {
-            std::string e = string_format( "failed to parse plural forms formula: %s", err.what() );
+            std::string e = fmt::format( "failed to parse plural forms formula: {}", err.what() );
             throw std::runtime_error( e );
         }
     }
@@ -746,7 +784,9 @@ std::vector<trans_library::library_string_descr>::const_iterator trans_library::
 
 void trans_library::build_string_table()
 {
-    assert( strings.empty() );
+    if (!strings.empty()) {
+        throw std::runtime_error("Expected string table to be empty.");
+    }
 
     for( size_t i_cat = 0; i_cat < catalogues.size(); i_cat++ ) {
         const trans_catalogue &cat = catalogues[i_cat];
