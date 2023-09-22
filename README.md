@@ -7,6 +7,7 @@ It's main use is to enable runtime loading, merging and use of multiple MO files
 * Validates MO files before use
 * Cross-platform and lightweight
 * Locale independent
+* Full support for plural forms, aims to be compatible with [Poedit](https://poedit.net/)
 
 ### Differences from libintl
 * No translation domains
